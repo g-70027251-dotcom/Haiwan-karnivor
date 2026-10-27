@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monster Punch - Brain Brawl (Haiwan Karnivor)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Fredoka & Press Start 2P -->
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Fredoka', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311b92 100%);
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .arcade-font {
+            font-family: 'Press Start 2P', cursive;
+        }
+
+        /* Canvas visual style */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Dynamic slash effect animation */
+        @keyframes slashAnim {
+            0% {
+                transform: scale(0.3) rotate(0deg);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.5) rotate(45deg);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2.2) rotate(90deg);
+                opacity: 0;
+            }
+        }
+
+        .slash-effect {
+            position: absolute;
+            pointer-events: none;
+            animation: slashAnim 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            z-index: 50;
+        }
+
+        /* Floating monster animation */
+        @keyframes floatMonster {
+            0%, 100% { transform: translateY(0px) rotate(-1.5deg); }
+            50% { transform: translateY(-12px) rotate(1.5deg); }
+        }
+
+        .floating {
+            animation: floatMonster 2.2s ease-in-out infinite;
+        }
+
+        /* Hit recoil effect when punched */
+        @keyframes hitShake {
+            0% { transform: scale(1) translate(0, 0); }
+            20% { transform: scale(1.25) translate(-12px, 12px) rotate(-5deg); }
+            40% { transform: scale(0.85) translate(12px, -12px) rotate(5deg); }
+            60% { transform: scale(1.1) translate(-6px, -6px); }
+            100% { transform: scale(1) translate(0, 0); }
+        }
+
+        .hit-recoil {
+            animation: hitShake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+        }
+
+        /* Defeated Monster animation */
+        @keyframes monsterKilled {
+            0% { transform: scale(1) rotate(0deg); opacity: 1; filter: brightness(2); }
+            100% { transform: scale(0) rotate(180deg); opacity: 0; filter: brightness(0.2); }
+        }
+
+        .monster-dead {
+            animation: monsterKilled 0.5s ease-in forwards !important;
+        }
+
+        /* Glowing texts */
+        .glow-text-yellow {
+            text-shadow: 0 0 12px rgba(250, 204, 21, 0.9), 0 0 24px rgba(234, 179, 8, 0.7);
+        }
+
+        .glow-box-pink {
+            box-shadow: 0 0 30px rgba(244, 63, 94, 0.7);
+        }
+
+        /* Pulse fist icon indicator */
+        @keyframes fistPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.3); }
+        }
+        .fist-active {
+            animation: fistPulse 0.3s ease-in-out infinite;
+        }
+
+        /* Webcam mirror container style */
+        .webcam-container {
+            transform: scaleX(-1);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between items-center relative p-3 md:p-5 text-white">
+
+    <!-- TOP HEADER BAR: SCORE, TIMER, LIVES -->
+    <header class="w-full max-w-5xl flex justify-between items-center bg-slate-900/85 backdrop-blur-md px-5 py-3 rounded-2xl border-2 border-indigo-500/60 z-20 shadow-2xl">
+        <!-- Lives -->
+        <div class="flex items-center space-x-2 bg-slate-800/90 px-4 py-2 rounded-xl border border-rose-500/50">
+            <span class="text-xs text-rose-300 uppercase tracking-wider font-bold mr-1">Nyawa:</span>
+            <div id="lives-container" class="flex space-x-1 text-2xl text-rose-500">
+                <i class="fa-solid fa-heart"></i>
+                <i class="fa-solid fa-heart"></i>
+                <i class="fa-solid fa-heart"></i>
+            </div>
+        </div>
+
+        <!-- Timer -->
+        <div class="flex flex-col items-center">
+            <span class="text-xs text-amber-300 uppercase tracking-widest font-semibold">Masa Lagi</span>
+            <div id="timer-display" class="arcade-font text-2xl md:text-3xl text-amber-400 glow-text-yellow">20</div>
+        </div>
+
+        <!-- Score -->
+        <div class="flex items-center space-x-3 bg-slate-800/90 px-4 py-2 rounded-xl border border-emerald-500/50">
+            <span class="text-xs text-emerald-300 uppercase tracking-wider font-bold">Skor:</span>
+            <span id="score-display" class="arcade-font text-xl md:text-2xl text-emerald-400">0</span>
+        </div>
+    </header>
+
+    <!-- MAIN GAME DISPLAY (WEBCAM MIRRORED CANVAS + MONSTERS OVERLAY) -->
+    <main class="relative w-full max-w-5xl flex-1 my-3 bg-slate-950 rounded-3xl overflow-hidden border-4 border-indigo-500/70 shadow-2xl flex items-center justify-center">
+        
+        <!-- Webcam Video Feed (Hidden, captured and rendered onto Canvas) -->
+        <video id="webcam" class="hidden" playsinline></video>
+        
+        <!-- Interactive Game Canvas (Draws Webcam + Custom Fist Glove + Particle Traces) -->
+        <canvas id="gameCanvas" class="w-full h-full object-cover webcam-container"></canvas>
+
+        <!-- Dynamic Monsters Container (Overlayed on Canvas) -->
+        <div id="monsters-container" class="absolute inset-0 pointer-events-none flex justify-around items-center px-4 md:px-8 z-10">
+            <!-- 3 Monster cards generated dynamically via JS -->
+        </div>
+
+        <!-- Question Box Banner at Top of Screen -->
+        <div class="absolute top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-3xl bg-indigo-950/95 border-2 border-cyan-400/90 rounded-2xl p-3 md:p-4 text-center z-20 shadow-2xl backdrop-blur-md">
+            <div class="text-xs uppercase tracking-widest text-cyan-300 font-bold mb-1">
+                <i class="fa-solid fa-paw mr-1 text-amber-400"></i> Sains Tahun 4: <span class="text-yellow-300">Haiwan Karnivor</span> (Soalan <span id="question-number">1</span>/10)
+            </div>
+            <h2 id="question-text" class="text-lg md:text-2xl font-bold text-white drop-shadow-md">
+                Memuatkan soalan...
+            </h2>
+        </div>
+
+        <!-- Hand Gesture Status Badge -->
+        <div id="fist-status" class="absolute bottom-4 left-4 bg-slate-900/90 px-4 py-2 rounded-xl border border-cyan-500/60 flex items-center space-x-2 z-20 text-xs text-cyan-200 shadow-lg">
+            <div id="fist-icon" class="w-4 h-4 rounded-full bg-rose-500"></div>
+            <span id="fist-text">Mencari Tangan...</span>
+        </div>
+    </main>
+
+    <!-- FOOTER HINT -->
+    <footer class="w-full max-w-5xl text-center text-xs md:text-sm text-indigo-200/90 font-medium pb-1 z-20">
+        <i class="fa-solid fa-hand-fist text-amber-400 mr-1"></i> Cara Bermain: Kepalkan tangan <strong class="text-yellow-300 uppercase font-black">(TUMBUK)</strong> pada raksasa yang membawa jawapan karnivor tepat!
+    </footer>
+
+    <!-- START / GAME OVER / VICTORY OVERLAY MODAL -->
+    <div id="modal-overlay" class="fixed inset-0 bg-slate-950/90 backdrop-blur-lg flex flex-col justify-center items-center z-50 p-6">
+        <div class="bg-indigo-900/95 border-4 border-amber-400 max-w-lg w-full rounded-3xl p-6 md:p-8 text-center shadow-2xl glow-box-pink flex flex-col items-center">
+            
+            <div id="modal-icon" class="text-6xl text-amber-400 mb-4 animate-bounce">
+                <i class="fa-solid fa-paw"></i>
+            </div>
+            
+            <h1 id="modal-title" class="arcade-font text-xl md:text-3xl text-yellow-300 mb-3 glow-text-yellow">
+                MONSTER PUNCH!
+            </h1>
+            
+            <p id="modal-subtitle" class="text-indigo-100 mb-6 text-xs md:text-base leading-relaxed">
+                Cabaran Sains: <strong>Haiwan Karnivor</strong>! Tunjukkan kepalan tangan anda di depan webcam untuk memukul raksasa yang memegang jawapan betul.
+            </p>
+
+            <!-- Topic Info Card -->
+            <div class="bg-indigo-950/90 rounded-2xl p-4 border border-indigo-400/40 w-full mb-6 text-xs md:text-sm text-indigo-200 text-left space-y-2">
+                <p><i class="fa-solid fa-drumstick-bite text-amber-400 mr-2"></i><strong>Topik:</strong> Haiwan Karnivor (Pemakan Daging)</p>
+                <p><i class="fa-solid fa-graduation-cap text-cyan-400 mr-2"></i><strong>Subjek:</strong> Sains Sekolah Rendah</p>
+                <p><i class="fa-solid fa-bullseye text-rose-400 mr-2"></i><strong>Sasaran:</strong> 10 Soalan | 3 Nyawa | 20 Saat/Soalan</p>
+            </div>
+
+            <!-- Final Score Display (Hidden at start) -->
+            <div id="final-score-container" class="hidden mb-6 bg-slate-900/90 p-4 rounded-2xl border border-amber-500/60 w-full">
+                <div class="text-xs uppercase text-slate-400 mb-1">Skor Akhir Anda</div>
+                <div id="final-score" class="arcade-font text-4xl text-emerald-400">0</div>
+            </div>
+
+            <!-- Start / Restart Button -->
+            <button id="btn-start" onclick="startGame()" class="w-full py-4 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-slate-950 font-black text-lg md:text-xl rounded-2xl shadow-xl border-2 border-yellow-200 transition-all transform hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center space-x-2">
+                <i class="fa-solid fa-play"></i>
+                <span id="btn-start-text">MULA MAIN</span>
+            </button>
+
+            <!-- Camera Permission Status -->
+            <p id="camera-loading-text" class="text-xs text-amber-300 mt-4 animate-pulse">
+                <i class="fa-solid fa-spinner fa-spin mr-1"></i> Menyediakan pengesan tangan MediaPipe...
+            </p>
+        </div>
+    </div>
+
+    <!-- AUDIO SYNTHESIZER (WEB AUDIO API - NO EXTERNAL ASSETS NEEDED) -->
+    <script>
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            // High impact punch punch sound
+            playPunch() {
+                this.init();
+                const now = this.ctx.currentTime;
+                
+                // Punch Impact (Low Frequency Drop)
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, now);
+                osc.frequency.exponentialRampToValueAtTime(30, now + 0.18);
+                
+                gain.gain.setValueAtTime(1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(now);
+                osc.stop(now + 0.18);
+            }
+
+            // Success Chime
+            playCorrect() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                notes.forEach((freq, i) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, now + i * 0.07);
+                    
+                    gain.gain.setValueAtTime(0.3, now + i * 0.07);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.25);
+                    
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    
+                    osc.start(now + i * 0.07);
+                    osc.stop(now + i * 0.07 + 0.25);
+                });
+            }
+
+            // Wrong Answer / Damage Sound
+            playWrong() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(160, now);
+                osc.frequency.linearRampToValueAtTime(50, now + 0.35);
+                
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(now);
+                osc.stop(now + 0.35);
+            }
+
+            // Game Over Melody
+            playGameOver() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const notes = [300, 260, 220, 150];
+                notes.forEach((freq, i) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, now + i * 0.18);
+                    
+                    gain.gain.setValueAtTime(0.35, now + i * 0.18);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.18 + 0.3);
+                    
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    
+                    osc.start(now + i * 0.18);
+                    osc.stop(now + i * 0.18 + 0.3);
+                });
+            }
+        }
+
+        const soundFX = new SoundFX();
+    </script>
+
+    <!-- MAIN GAME LOGIC & MEDIAPIPE HAND GESTURE INTEGRATION -->
+    <script>
+        // 10 Educational Questions on Karnivor (Carnivores - Primary Science)
+        const questionBank = [
+            {
+                q: "Antara berikut, manakah merupakan haiwan KARNIVOR?",
+                options: ["Harimau", "Lembu", "Kambing"],
+                answer: 0
+            },
+            {
+                q: "Apakah makanan utama bagi haiwan Karnivor?",
+                options: ["Tumbuhan & Buah", "Daging & Haiwan lain", "Biji Benih"],
+                answer: 1
+            },
+            {
+                q: "Jenis gigi manakah paling tajam pada haiwan karnivor untuk mengoyak daging?",
+                options: ["Gigi Geraham", "Gigi Kacip", "Gigi Taring"],
+                answer: 2
+            },
+            {
+                q: "Manakah haiwan karnivor yang memburu di dalam laut?",
+                options: ["Paus Humpback", "Ikan Jerung", "Manatee"],
+                answer: 1
+            },
+            {
+                q: "Burung manakah merupakan pemangsa karnivor yang makan daging?",
+                options: ["Burung Helang", "Burung Merpati", "Burung Kakakatua"],
+                answer: 0
+            },
+            {
+                q: "Haiwan manakah bertindak sebagai karnivor di darat?",
+                options: ["Zirafah", "Serigala", "Gajah"],
+                answer: 1
+            },
+            {
+                q: "Reptilia manakah yang membunuh mangsa dan merupakan karnivor?",
+                options: ["Penyu", "Iguana Hijau", "Buaya"],
+                answer: 2
+            },
+            {
+                q: "Mengapakah harimau mempunyai gigi taring yang sangat panjang?",
+                options: ["Memotong rumput", "Mengoyak daging mangsa", "Menguyah bijirin"],
+                answer: 1
+            },
+            {
+                q: "Manakah haiwan karnivor bersaiz kecil yang makan serangga atau haiwan kecil?",
+                options: ["Katak", "Kuda", "Arnab"],
+                answer: 0
+            },
+            {
+                q: "Antara berikut, haiwan manakah yang BUKAN karnivor?",
+                options: ["Singa", "Beruang Kutub", "Kuda Zabra"],
+                answer: 2
+            }
+        ];
+
+        // Monster Visual SVG Profiles
+        const monsterProfiles = [
+            {
+                name: "Gloop",
+                bgGradient: "from-rose-500 to-pink-700",
+                borderColor: "border-rose-300",
+                svg: `<svg viewBox="0 0 100 100" class="w-16 h-16 md:w-20 md:h-20 filter drop-shadow-xl"><path d="M20,50 Q10,10 50,10 Q90,10 80,50 Q90,90 50,90 Q10,90 20,50 Z" fill="#f43f5e"/><circle cx="35" cy="40" r="8" fill="white"/><circle cx="35" cy="40" r="4" fill="black"/><circle cx="65" cy="40" r="8" fill="white"/><circle cx="65" cy="40" r="4" fill="black"/><path d="M 35 65 Q 50 80 65 65" stroke="black" stroke-width="4" fill="none"/><polygon points="40,65 45,72 50,65" fill="white"/><polygon points="50,65 55,72 60,65" fill="white"/></svg>`
+            },
+            {
+                name: "Blinky",
+                bgGradient: "from-amber-400 to-orange-600",
+                borderColor: "border-amber-200",
+                svg: `<svg viewBox="0 0 100 100" class="w-16 h-16 md:w-20 md:h-20 filter drop-shadow-xl"><rect x="15" y="15" width="70" height="70" rx="22" fill="#f59e0b"/><circle cx="50" cy="40" r="14" fill="white"/><circle cx="50" cy="40" r="6" fill="#1e1b4b"/><polygon points="35,65 65,65 50,82" fill="#7c2d12"/></svg>`
+            },
+            {
+                name: "Zorp",
+                bgGradient: "from-emerald-400 to-teal-700",
+                borderColor: "border-emerald-200",
+                svg: `<svg viewBox="0 0 100 100" class="w-16 h-16 md:w-20 md:h-20 filter drop-shadow-xl"><circle cx="50" cy="50" r="40" fill="#10b981"/><circle cx="30" cy="35" r="7" fill="white"/><circle cx="30" cy="35" r="3" fill="black"/><circle cx="70" cy="35" r="7" fill="white"/><circle cx="70" cy="35" r="3" fill="black"/><path d="M 30 60 Q 50 42 70 60" stroke="black" stroke-width="4" fill="none"/></svg>`
+            }
+        ];
+
+        // State Variables
+        let currentQuestionIdx = 0;
+        let score = 0;
+        let lives = 3;
+        let timerSeconds = 20;
+        let timerInterval = null;
+        let isGameRunning = false;
+        let isPunchCooldown = false;
+
+        // Position & Fist State
+        let handPos = { x: 0, y: 0, isFist: false, rawX: 0, rawY: 0 };
+
+        // DOM References
+        const canvasElement = document.getElementById('gameCanvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const videoElement = document.getElementById('webcam');
+        const monstersContainer = document.getElementById('monsters-container');
+        const scoreDisplay = document.getElementById('score-display');
+        const timerDisplay = document.getElementById('timer-display');
+        const livesContainer = document.getElementById('lives-container');
+        const questionNumberEl = document.getElementById('question-number');
+        const questionTextEl = document.getElementById('question-text');
+        const modalOverlay = document.getElementById('modal-overlay');
+        const fistStatusIcon = document.getElementById('fist-icon');
+        const fistStatusText = document.getElementById('fist-text');
+
+        // Resize Canvas dynamically
+        function resizeCanvas() {
+            canvasElement.width = canvasElement.clientWidth;
+            canvasElement.height = canvasElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Initialize MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        hands.onResults(onHandResults);
+
+        // Webcam Stream Initialization
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+
+        camera.start().then(() => {
+            const loadingText = document.getElementById('camera-loading-text');
+            if (loadingText) loadingText.classList.add('hidden');
+        }).catch(err => {
+            console.error("Kamera gagal diakses: ", err);
+            const loadingText = document.getElementById('camera-loading-text');
+            if (loadingText) loadingText.innerHTML = "<span class='text-rose-400'>Ralat: Akses kamera diperlukan untuk pengesanan tangan!</span>";
+        });
+
+        // Detect Fist (Kepal Tangan / Punch)
+        function isFistGesture(landmarks) {
+            const wrist = landmarks[0];
+            const fingerTips = [8, 12, 16, 20];      // Index, Middle, Ring, Pinky tips
+            const fingerKnuckles = [5, 9, 13, 17];  // MCP joints
+
+            let foldedFingers = 0;
+            for (let i = 0; i < 4; i++) {
+                const tip = landmarks[fingerTips[i]];
+                const mcp = landmarks[fingerKnuckles[i]];
+                
+                // Distance between Tip and Wrist vs MCP and Wrist
+                const distTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                const distMcp = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
+
+                if (distTip < distMcp * 1.15) {
+                    foldedFingers++;
+                }
+            }
+
+            return foldedFingers >= 3;
+        }
+
+        // Handle MediaPipe Hand Landmarks Results
+        function onHandResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Draw Mirrored Webcam Video onto Canvas
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+
+                // Middle finger MCP joint (Landmark 9) for center of palm
+                const rawX = landmarks[9].x;
+                const rawY = landmarks[9].y;
+
+                // Canvas coordinates (Mirrored coordinates to match video overlay CSS)
+                const screenX = rawX * canvasElement.width;
+                const screenY = rawY * canvasElement.height;
+
+                const isFist = isFistGesture(landmarks);
+                handPos = { x: screenX, y: screenY, isFist: isFist, rawX: rawX, rawY: rawY };
+
+                // Update UI indicator
+                fistStatusIcon.className = `w-4 h-4 rounded-full ${isFist ? 'bg-emerald-400 fist-active' : 'bg-amber-400'}`;
+                fistStatusText.innerText = isFist ? "TUMBUK (Fist Active)!" : "Tangan Dikesan (Kepal Tangan)";
+
+                // Draw Glove Cursor overlay on user's hand inside Canvas
+                canvasCtx.beginPath();
+                canvasCtx.arc(screenX, screenY, isFist ? 38 : 28, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = isFist ? 'rgba(239, 68, 68, 0.75)' : 'rgba(59, 130, 246, 0.65)';
+                canvasCtx.fill();
+                canvasCtx.lineWidth = 4;
+                canvasCtx.strokeStyle = isFist ? '#fef08a' : '#ffffff';
+                canvasCtx.stroke();
+
+                // Draw Fist / Hand Icon inside Glove
+                canvasCtx.fillStyle = '#ffffff';
+                canvasCtx.font = '22px "Font Awesome 6 Free"';
+                canvasCtx.textAlign = 'center';
+                canvasCtx.textBaseline = 'middle';
+                canvasCtx.fillText(isFist ? '\uf6de' : '\uf25a', screenX, screenY);
+
+                // Collision check on punch (coordinates transformed to match DOM overlay)
+                if (isGameRunning && isFist && !isPunchCooldown) {
+                    // Mirrored coordinate calculation for DOM punch collision
+                    const domX = (1 - rawX) * canvasElement.width;
+                    const domY = rawY * canvasElement.height;
+                    checkPunchCollision(domX, domY);
+                }
+            } else {
+                fistStatusIcon.className = "w-4 h-4 rounded-full bg-rose-500";
+                fistStatusText.innerText = "Sila tunjukkan tangan pada kamera";
+            }
+
+            canvasCtx.restore();
+        }
+
+        // Check Collision between Fist Position and Monster DOM Cards
+        function checkPunchCollision(x, y) {
+            const monsterElements = document.querySelectorAll('.monster-card');
+            monsterElements.forEach((card) => {
+                if (card.classList.contains('monster-dead')) return;
+
+                const rect = card.getBoundingClientRect();
+                const containerRect = canvasElement.getBoundingClientRect();
+
+                const cardLeft = rect.left - containerRect.left;
+                const cardRight = rect.right - containerRect.left;
+                const cardTop = rect.top - containerRect.top;
+                const cardBottom = rect.bottom - containerRect.top;
+
+                // Check hit within boundaries
+                if (x >= cardLeft && x <= cardRight && y >= cardTop && y <= cardBottom) {
+                    const chosenIdx = parseInt(card.getAttribute('data-index'));
+                    executePunch(chosenIdx, x, y, card);
+                }
+            });
+        }
+
+        // Punch Action Logic
+        function executePunch(chosenIdx, hitX, hitY, cardEl) {
+            isPunchCooldown = true;
+            soundFX.playPunch();
+
+            // Render Slash visual effect
+            createSlashEffect(hitX, hitY);
+
+            // Trigger Shake Recoil
+            cardEl.classList.add('hit-recoil');
+
+            const currentQ = questionBank[currentQuestionIdx];
+
+            setTimeout(() => {
+                if (chosenIdx === currentQ.answer) {
+                    // CORRECT ANSWER
+                    soundFX.playCorrect();
+                    score += 100 + timerSeconds * 10;
+                    scoreDisplay.innerText = score;
+
+                    // Monster Defeated animation
+                    cardEl.classList.add('monster-dead');
+                    
+                    setTimeout(() => {
+                        nextQuestion();
+                    }, 600);
+                } else {
+                    // WRONG ANSWER
+                    soundFX.playWrong();
+                    lives--;
+                    updateLivesDisplay();
+                    cardEl.classList.add('bg-rose-600/90', 'border-rose-300');
+
+                    if (lives <= 0) {
+                        endGame(false);
+                    } else {
+                        setTimeout(() => {
+                            nextQuestion();
+                        }, 600);
+                    }
+                }
+            }, 150);
+        }
+
+        // Create Slash Visual Effect
+        function createSlashEffect(x, y) {
+            const slash = document.createElement('div');
+            slash.className = 'slash-effect text-yellow-300 text-6xl md:text-7xl drop-shadow-lg';
+            slash.style.left = `${x - 35}px`;
+            slash.style.top = `${y - 35}px`;
+            slash.innerHTML = `<i class="fa-solid fa-burst"></i>`;
+            document.querySelector('main').appendChild(slash);
+
+            setTimeout(() => slash.remove(), 400);
+        }
+
+        // Render Current Question and Monsters
+        function renderQuestion() {
+            const qData = questionBank[currentQuestionIdx];
+            questionNumberEl.innerText = currentQuestionIdx + 1;
+            questionTextEl.innerText = qData.q;
+
+            monstersContainer.innerHTML = '';
+
+            qData.options.forEach((optText, idx) => {
+                const profile = monsterProfiles[idx % monsterProfiles.length];
+
+                const card = document.createElement('div');
+                card.setAttribute('data-index', idx);
+                card.className = `monster-card pointer-events-auto cursor-pointer floating flex flex-col items-center p-3 md:p-5 bg-gradient-to-b ${profile.bgGradient} rounded-3xl border-4 ${profile.borderColor} shadow-2xl transition-all hover:scale-105 w-1/3 max-w-[240px]`;
+                
+                card.innerHTML = `
+                    <div class="mb-2 transform transition duration-300">${profile.svg}</div>
+                    <div class="bg-slate-900/90 border-2 border-white/80 rounded-2xl py-2 px-3 w-full text-center shadow-md">
+                        <span class="text-xs md:text-base font-bold text-white leading-tight block break-words">${optText}</span>
+                    </div>
+                    <div class="mt-2 text-[10px] md:text-xs font-bold text-yellow-200 uppercase tracking-wider flex items-center">
+                        <i class="fa-solid fa-hand-fist mr-1"></i> Tumbuk Sini
+                    </div>
+                `;
+
+                // Mouse click fallback for testing without camera
+                card.onclick = (e) => {
+                    if (isGameRunning && !isPunchCooldown && !card.classList.contains('monster-dead')) {
+                        const rect = card.getBoundingClientRect();
+                        const containerRect = canvasElement.getBoundingClientRect();
+                        const x = rect.left + rect.width / 2 - containerRect.left;
+                        const y = rect.top + rect.height / 2 - containerRect.top;
+                        executePunch(idx, x, y, card);
+                    }
+                };
+
+                monstersContainer.appendChild(card);
+            });
+
+            resetTimer();
+            isPunchCooldown = false;
+        }
+
+        // Timer Logic
+        function resetTimer() {
+            clearInterval(timerInterval);
+            timerSeconds = 20;
+            timerDisplay.innerText = timerSeconds;
+
+            timerInterval = setInterval(() => {
+                if (!isGameRunning) return;
+                timerSeconds--;
+                timerDisplay.innerText = timerSeconds;
+
+                if (timerSeconds <= 5) {
+                    timerDisplay.classList.add('animate-pulse', 'text-rose-400');
+                } else {
+                    timerDisplay.classList.remove('animate-pulse', 'text-rose-400');
+                }
+
+                if (timerSeconds <= 0) {
+                    clearInterval(timerInterval);
+                    soundFX.playWrong();
+                    lives--;
+                    updateLivesDisplay();
+
+                    if (lives <= 0) {
+                        endGame(false);
+                    } else {
+                        nextQuestion();
+                    }
+                }
+            }, 1000);
+        }
+
+        // Advance to next question or win
+        function nextQuestion() {
+            currentQuestionIdx++;
+            if (currentQuestionIdx >= questionBank.length) {
+                endGame(true);
+            } else {
+                renderQuestion();
+            }
+        }
+
+        // Lives UI Display
+        function updateLivesDisplay() {
+            livesContainer.innerHTML = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < lives) {
+                    livesContainer.innerHTML += `<i class="fa-solid fa-heart text-rose-500 animate-pulse"></i>`;
+                } else {
+                    livesContainer.innerHTML += `<i class="fa-solid fa-heart text-slate-700"></i>`;
+                }
+            }
+        }
+
+        // Start Game
+        function startGame() {
+            soundFX.init();
+            score = 0;
+            lives = 3;
+            currentQuestionIdx = 0;
+            isGameRunning = true;
+
+            scoreDisplay.innerText = score;
+            updateLivesDisplay();
+            modalOverlay.classList.add('hidden');
+
+            renderQuestion();
+        }
+
+        // End Game (Win / Game Over)
+        function endGame(isWin) {
+            isGameRunning = false;
+            clearInterval(timerInterval);
+
+            modalOverlay.classList.remove('hidden');
+            const modalTitle = document.getElementById('modal-title');
+            const modalSubtitle = document.getElementById('modal-subtitle');
+            const modalIcon = document.getElementById('modal-icon');
+            const finalScoreContainer = document.getElementById('final-score-container');
+            const finalScoreEl = document.getElementById('final-score');
+            const btnStartText = document.getElementById('btn-start-text');
+
+            finalScoreContainer.classList.remove('hidden');
+            finalScoreEl.innerText = score;
+
+            if (isWin) {
+                soundFX.playCorrect();
+                modalIcon.className = "text-6xl text-emerald-400 mb-4 animate-bounce";
+                modalIcon.innerHTML = `<i class="fa-solid fa-trophy"></i>`;
+                modalTitle.innerText = "TAHNIAH! JUARA KARNIVOR!";
+                modalSubtitle.innerText = "Anda berjaya menumbuk semua raksasa dan menguasai tajuk Haiwan Karnivor!";
+            } else {
+                soundFX.playGameOver();
+                modalIcon.className = "text-6xl text-rose-500 mb-4 animate-bounce";
+                modalIcon.innerHTML = `<i class="fa-solid fa-skull-crossbones"></i>`;
+                modalTitle.innerText = "TAMAT PERMAINAN!";
+                modalSubtitle.innerText = "Nyawa anda telah habis! Jangan putus asa, cuba lagi untuk kalahkan semua raksasa.";
+            }
+
+            btnStartText.innerText = "MAIN SEMULA";
+        }
+    </script>
+</body>
+</html>
